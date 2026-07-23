@@ -2,14 +2,19 @@ FROM node:22 AS builder
 
 WORKDIR /app
 
-COPY frontend/package*.json ./
-
+COPY package*.json ./
 RUN npm install
 
-COPY frontend/ .
+COPY . .
 
 RUN npm run build
 
-FROM nginx:alpine
+FROM node:22-alpine
 
-COPY --from=builder /app/dist /usr/share/nginx/html
+WORKDIR /app
+
+COPY --from=builder /app ./
+
+EXPOSE 3000
+
+CMD ["npm", "start"]
