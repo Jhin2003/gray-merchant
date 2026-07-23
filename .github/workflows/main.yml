@@ -16,4 +16,4 @@ jobs:
 
       - name: Build Docker image
         run: |
-          docker build -t my-react-app .
+          - run: docker build -t gray-merchant ./frontend
