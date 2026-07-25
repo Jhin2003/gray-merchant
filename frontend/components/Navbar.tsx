@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { ShoppingCart, User } from "lucide-react";
+
 type NavbarProps = {
   title?: string;
 };
@@ -6,34 +9,42 @@ export default function Navbar({
   title = "Gray Merchant",
 }: NavbarProps) {
   return (
-    <nav className="w-full  text-white shadow-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-6">
-       
-       <h1 className="text-xl font-bold text-gray-200">
-  {title}
-</h1>
+    <nav className="w-full text-white shadow-md">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between">
+        <h1 className="text-xl font-bold text-gray-200">
+          {title}
+        </h1>
 
         <div className="flex items-center gap-6">
-          <a
+          <Link
             href="/shop"
-            className="transition-colors hover:text-gray-300"
+            className="transition-colors hover:text-gray-600"
           >
             MTG Singles
-          </a>
+          </Link>
 
-          <a
+          <Link
             href="/shop/products"
-            className="transition-colors hover:text-gray-300"
+            className="transition-colors hover:text-gray-600"
           >
-            Sealed and Accessories  
-          </a>
+            Sealed & Accessories
+          </Link>
 
-          <a
+          <Link
             href="/shop/cart"
-            className="transition-colors hover:text-gray-300"
+            className="flex items-center gap-2 transition-colors hover:text-gray-300"
           >
-            Cart
-          </a>
+            <ShoppingCart size={20} />
+   
+          </Link>
+
+          <Link
+            href="/profile"
+            className="transition-colors hover:text-gray-600"
+            aria-label="Profile"
+          >
+            <User size={22} />
+          </Link>
         </div>
       </div>
     </nav>
