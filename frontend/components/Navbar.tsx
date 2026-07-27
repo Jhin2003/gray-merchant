@@ -1,5 +1,10 @@
+
+
 import Link from "next/link";
 import { ShoppingCart, User } from "lucide-react";
+
+import ProfileDropdown from "./ProfileDropdown";
+
 
 type NavbarProps = {
   title?: string;
@@ -38,13 +43,7 @@ export default function Navbar({
    
           </Link>
 
-          <Link
-            href="/profile"
-            className="transition-colors hover:text-gray-600"
-            aria-label="Profile"
-          >
-            <User size={22} />
-          </Link>
+          <ProfileDropdown />
         </div>
       </div>
     </nav>
