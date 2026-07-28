@@ -7,9 +7,12 @@ import { AuditModule } from './audit/audit.module';
 import { ConfigModule } from '@nestjs/config';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
+import { ScryfallService } from './scryfall/scryfall.service';
+import { CardsService } from './cards/cards.service';
+import { CardsModule } from './cards/cards.module';
 
 @Module({
-  imports: [
+  imports: [CardsModule
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([
       { name: 'short', ttl: 60_000, limit: 100 }, // 100 req / min (global)
@@ -19,6 +22,6 @@ import { APP_GUARD } from '@nestjs/core';
     AuthModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
+  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }, ScryfallService, CardsService],
 })
 export class AppModule {}

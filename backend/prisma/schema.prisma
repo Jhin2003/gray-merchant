@@ -115,12 +115,29 @@ model AuditLog {
 }
 
 // Existing gray-merchant domain model.
-model Product {
+model Card {
   id          Int      @id @default(autoincrement())
+
+  scryfallId  String   @unique
   name        String
-  description String?
+  imageUrl    String?
+  setCode     String
+
+  listings    Listing[]
+
+  createdAt   DateTime @default(now())
+}
+
+
+model Listing {
+  id          Int      @id @default(autoincrement())
+
+  cardId      Int
+  card        Card     @relation(fields: [cardId], references: [id])
+
   price       Decimal
-  stock       Int
-  imageUrl    String
+  stock       Int      @default(1)
+  condition   String
+
   createdAt   DateTime @default(now())
 }
