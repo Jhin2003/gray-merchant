@@ -1,4 +1,6 @@
+import { Phone } from "lucide-react";
 import Link from "next/link";
+import { FaFacebook, FaTiktok } from "react-icons/fa";
 
 export default function Footer() {
   return (
@@ -7,20 +9,22 @@ export default function Footer() {
         <div className="grid gap-10 md:grid-cols-4">
           {/* Brand */}
           <div>
-            <h2 className="text-xl font-bold text-white">
-              Gray Merchant
-            </h2>
+            <h2 className="text-xl font-bold text-white">About Us</h2>
+
             <p className="mt-3 text-sm leading-6">
-              Your trusted marketplace for Magic: The Gathering singles,
-              sealed products, and accessories.
+              Your trusted marketplace for Magic: The Gathering singles, sealed
+              products, and accessories.
+            </p>
+
+            <p className="mt-2 flex items-center gap-2 text-sm">
+              <Phone className="h-4 w-4 text-gray-500" />
+              <span>+63 927 451 8978</span>
             </p>
           </div>
 
           {/* Shop */}
           <div>
-            <h3 className="mb-4 font-semibold text-white">
-              Shop
-            </h3>
+            <h3 className="mb-4 font-semibold text-white">Shop</h3>
 
             <ul className="space-y-2 text-sm">
               <li>
@@ -48,9 +52,7 @@ export default function Footer() {
 
           {/* Support */}
           <div>
-            <h3 className="mb-4 font-semibold text-white">
-              Support
-            </h3>
+            <h3 className="mb-4 font-semibold text-white">Support</h3>
 
             <ul className="space-y-2 text-sm">
               <li>
@@ -76,16 +78,28 @@ export default function Footer() {
             </ul>
           </div>
 
-          {/* Contact */}
+          {/* Social Media */}
           <div>
-            <h3 className="mb-4 font-semibold text-white">
-              Contact
-            </h3>
+            <h3 className="mb-4 font-semibold text-white">Social Media</h3>
 
-            <div className="space-y-2 text-sm">
-              <p>Email: support@graymerchant.com</p>
-              <p>Mon – Fri</p>
-              <p>9:00 AM – 6:00 PM</p>
+            <div className="space-y-3 text-sm">
+              <Link
+                href="https://facebook.com/graymerchant"
+                target="_blank"
+                className="flex items-center gap-2 text-gray-400 transition-colors hover:text-white"
+              >
+                <FaFacebook className="h-4 w-4" />
+                <span>Facebook</span>
+              </Link>
+
+              <Link
+                href="https://tiktok.com/@graymerchant"
+                target="_blank"
+                className="flex items-center gap-2 text-gray-400 transition-colors hover:text-white"
+              >
+                <FaTiktok className="h-4 w-4" />
+                <span>TikTok</span>
+              </Link>
             </div>
           </div>
         </div>
