@@ -1,5 +1,6 @@
 import Navbar from "@/components/Navbar";
 import SearchBar from "@/components/Searchbar";
+import Footer from "@/components/Footer";
 
 export default function Layout({
   children,
@@ -12,6 +13,7 @@ export default function Layout({
         <Navbar />
         <SearchBar />
         <main>{children}</main>
+        <Footer />
       </div>
     </div>
   );
