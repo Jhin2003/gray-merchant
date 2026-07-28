@@ -1,17 +1,120 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider        = "prisma-client"
+  output          = "../generated/prisma"
+  moduleFormat    = "cjs"
+  // Prisma 7 requires a driver adapter to be configured on the client.
+  // The adapter (e.g. @prisma/adapter-pg) is supplied when instantiating
+  // PrismaClient in src/prisma/prisma.service.ts.
+  previewFeatures = ["driverAdapters"]
 }
 
 datasource db {
   provider = "postgresql"
 }
 
+// Authflow-style roles (USER, ADMIN, STAFF, etc.)
+model Role {
+  id          Int       @id @default(autoincrement())
+  name        String    @unique
+  description String?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  users       User[]
+}
+
+// Single User model with a `type` discriminator (USER / STAFF / ADMIN)
+// so the same authentication logic can be reused for shop customers
+// and gray-merchant staff/admin operators.
+enum UserType {
+  USER
+  STAFF
+  ADMIN
+}
+
+model User {
+  id                   String    @id @default(uuid())
+  email                String    @unique
+  password             String
+  type                 UserType  @default(USER)
+  roleId               Int?
+  role                 Role?     @relation(fields: [roleId], references: [id])
+  failedLoginAttempts  Int       @default(0)
+  lockedUntil          DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  sessions             Session[]
+  authorizationCodes   AuthorizationCode[]
+  auditLogs            AuditLog[]
+
+  @@index([email])
+}
+
+// Server-side session records. The `token` field mirrors the access JWT
+// (for direct lookup); the `refreshToken` is rotated on every refresh.
+model Session {
+  id           String   @id @default(uuid())
+  token        String   @unique
+  refreshToken String   @unique
+  expiresAt    DateTime
+  userAgent    String?
+  ipAddress    String?
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([userId])
+  @@index([refreshToken])
+}
+
+// OAuth2 client registrations (apps that may request authorization codes).
+model Application {
+  id           String   @id @default(uuid())
+  name         String
+  clientId     String   @unique
+  clientSecret String?
+  redirectUri  String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Short-lived OAuth2 authorization codes (with PKCE support).
+model AuthorizationCode {
+  id                   String    @id @default(uuid())
+  code                 String    @unique
+  clientId             String
+  redirectUri          String
+  userId               String
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeChallenge        String?
+  codeChallengeMethod  String?
+  expiresAt            DateTime
+  used                 Boolean   @default(false)
+  createdAt            DateTime  @default(now())
+
+  @@index([code])
+  @@index([userId])
+}
+
+// Audit log for security-sensitive events (login, logout, lockout, etc.)
+model AuditLog {
+  id        String   @id @default(uuid())
+  action    String
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  ipAddress String?
+  meta      Json?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([action])
+}
+
+// Existing gray-merchant domain model.
 model Product {
   id          Int      @id @default(autoincrement())
   name        String
