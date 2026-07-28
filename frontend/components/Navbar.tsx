@@ -15,7 +15,7 @@ export default function Navbar({
 }: NavbarProps) {
   return (
     <nav className="w-full text-white shadow-md">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between">
+      <div className="mx-auto flex h-16 max-w-7xl px-6 items-center justify-between">
         <h1 className="text-xl font-bold text-gray-200">
           {title}
         </h1>
