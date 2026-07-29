@@ -12,7 +12,8 @@ import { CardsService } from './cards/cards.service';
 import { CardsModule } from './cards/cards.module';
 
 @Module({
-  imports: [CardsModule
+  imports: [
+    CardsModule,
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([
       { name: 'short', ttl: 60_000, limit: 100 }, // 100 req / min (global)
@@ -22,6 +23,11 @@ import { CardsModule } from './cards/cards.module';
     AuthModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: ThrottlerGuard }, ScryfallService, CardsService],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: ThrottlerGuard },
+    ScryfallService,
+    CardsService,
+  ],
 })
 export class AppModule {}

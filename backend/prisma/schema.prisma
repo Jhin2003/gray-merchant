@@ -1,15 +1,15 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-generator client {
-  provider        = "prisma-client"
-  output          = "../generated/prisma"
-  moduleFormat    = "cjs"
-  // Prisma 7 requires a driver adapter to be configured on the client.
-  // The adapter (e.g. @prisma/adapter-pg) is supplied when instantiating
-  // PrismaClient in src/prisma/prisma.service.ts.
-  previewFeatures = ["driverAdapters"]
-}
+  generator client {
+    provider        = "prisma-client"
+    output          = "../generated/prisma"
+    moduleFormat    = "cjs"
+    // Prisma 7 requires a driver adapter to be configured on the client.
+    // The adapter (e.g. @prisma/adapter-pg) is supplied when instantiating
+    // PrismaClient in src/prisma/prisma.service.ts.
+    previewFeatures = ["driverAdapters"]
+  }
 
 datasource db {
   provider = "postgresql"
