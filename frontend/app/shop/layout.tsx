@@ -1,6 +1,7 @@
 import Navbar from "@/components/Navbar";
 import SearchBar from "@/components/Searchbar";
 import Footer from "@/components/Footer";
+import Navigation from "@/components/Navigation";
 
 export default function Layout({
   children,
@@ -10,7 +11,7 @@ export default function Layout({
   return (
     <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="mx-auto max-w-7xl">
-        <Navbar />
+        <Navigation />
         <main>{children}</main>
         <Footer />
       </div>
