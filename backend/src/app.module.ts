@@ -11,6 +11,7 @@ import { ScryfallService } from './scryfall/scryfall.service';
 import { CardsService } from './cards/cards.service';
 import { CardsModule } from './cards/cards.module';
 import { ScryfallModule } from './scryfall/scryfall.module';
+import { ListingsModule } from './listings/listings.module';
 
 @Module({
   imports: [
@@ -23,6 +24,7 @@ import { ScryfallModule } from './scryfall/scryfall.module';
     AuditModule,
     AuthModule,
     ScryfallModule,
+    ListingsModule,
   ],
   controllers: [AppController],
   providers: [
