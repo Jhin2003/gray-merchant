@@ -10,6 +10,7 @@ import { APP_GUARD } from '@nestjs/core';
 import { ScryfallService } from './scryfall/scryfall.service';
 import { CardsService } from './cards/cards.service';
 import { CardsModule } from './cards/cards.module';
+import { ScryfallModule } from './scryfall/scryfall.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { CardsModule } from './cards/cards.module';
     PrismaModule,
     AuditModule,
     AuthModule,
+    ScryfallModule,
   ],
   controllers: [AppController],
   providers: [

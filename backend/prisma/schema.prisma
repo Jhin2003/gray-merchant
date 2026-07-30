@@ -121,8 +121,8 @@ model Card {
   scryfallId  String   @unique
   name        String
   imageUrl    String?
-  setCode     String
-
+ 
+  setName     String
   listings    Listing[]
 
   createdAt   DateTime @default(now())
