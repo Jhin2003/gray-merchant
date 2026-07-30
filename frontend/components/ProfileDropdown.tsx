@@ -14,23 +14,17 @@ export default function ProfileDropdown() {
         onClick={() => setOpen((prev) => !prev)}
         className="flex items-center justify-center rounded-full p-2 transition hover:bg-gray-100 dark:hover:bg-gray-800"
       >
-        <User
-          size={22}
-          className="text-gray-600 dark:text-gray-300"
-        />
+        <User size={22} className="text-gray-600 dark:text-gray-300" />
       </button>
 
       {/* Dropdown */}
       {open && (
         <div className="absolute right-0 mt-3 w-48 rounded-xl border border-gray-200 bg-white p-2 shadow-lg dark:border-gray-700 dark:bg-gray-900    z-50">
-          
           <div className="px-3 py-2">
             <p className="text-sm font-semibold text-gray-900 dark:text-white">
               Miguel
             </p>
-            <p className="text-xs text-gray-500">
-              user@example.com
-            </p>
+            <p className="text-xs text-gray-500">user@example.com</p>
           </div>
 
           <hr className="my-2 border-gray-200 dark:border-gray-700" />
@@ -50,7 +44,6 @@ export default function ProfileDropdown() {
           <button className="w-full rounded-lg px-3 py-2 text-left text-sm text-red-500 hover:bg-gray-100 dark:hover:bg-gray-800">
             Logout
           </button>
-
         </div>
       )}
     </div>
