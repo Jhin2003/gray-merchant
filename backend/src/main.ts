@@ -5,6 +5,7 @@ import helmet from 'helmet';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
 import { ZodErrorFilter } from './auth/zod-error.filter';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
@@ -15,6 +16,7 @@ async function bootstrap(): Promise<void> {
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
+
   app.enableCors({
     origin: origins.length === 0 ? true : origins,
     credentials: true,
@@ -30,16 +32,30 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
   app.set('trust proxy', 1);
   app.use(cookieParser());
+
   app.useGlobalPipes(
-  new ValidationPipe({
-    whitelist: true,
-    transform: true,
-    transformOptions: {
-      enableImplicitConversion: true,
-    },
-  }),
-);
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      transformOptions: {
+        enableImplicitConversion: true,
+      },
+    }),
+  );
+
   app.useGlobalFilters(new ZodErrorFilter());
+
+  // Swagger
+  const config = new DocumentBuilder()
+    .setTitle('MTG Store API')
+    .setDescription('API documentation')
+    .setVersion('1.0')
+    .addBearerAuth()
+    .build();
+
+  const document = SwaggerModule.createDocument(app, config);
+
+  SwaggerModule.setup('api', app, document);
 
   await app.listen(process.env.PORT ?? 3001);
 }
