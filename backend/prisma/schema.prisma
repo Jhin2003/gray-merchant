@@ -138,6 +138,8 @@ model Listing {
   price       Decimal
   stock       Int      @default(1)
   condition   String
-
+  language    String
+  isFoil      Boolean
   createdAt   DateTime @default(now())
+  
 }

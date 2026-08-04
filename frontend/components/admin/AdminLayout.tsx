@@ -1,4 +1,4 @@
-'use client';
+
 
 import SidebarNav from './SidebarNav';
 
@@ -11,7 +11,7 @@ export default function AdminLayout({ children }: AdminLayoutProps) {
     <>
     
 
-      <div className="flex min-h-[calc(100vh-68px)] w-full flex-col bg-gray-100 md:flex-row">
+      <div className="flex min-h-screen w-full flex-col  md:flex-row">
         <SidebarNav />
 
         <main className="flex-1 p-4">

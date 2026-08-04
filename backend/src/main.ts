@@ -30,7 +30,15 @@ async function bootstrap(): Promise<void> {
   app.use(helmet());
   app.set('trust proxy', 1);
   app.use(cookieParser());
-  app.useGlobalPipes(new ValidationPipe({ whitelist: true, transform: true }));
+  app.useGlobalPipes(
+  new ValidationPipe({
+    whitelist: true,
+    transform: true,
+    transformOptions: {
+      enableImplicitConversion: true,
+    },
+  }),
+);
   app.useGlobalFilters(new ZodErrorFilter());
 
   await app.listen(process.env.PORT ?? 3001);

@@ -17,7 +17,7 @@ import { ScryfallModule } from './scryfall/scryfall.module';
     CardsModule,
     ConfigModule.forRoot({ isGlobal: true }),
     ThrottlerModule.forRoot([
-      { name: 'short', ttl: 60_000, limit: 100 }, // 100 req / min (global)
+      { name: 'short', ttl: 60_000, limit: 100000 }, // 100 req / min (global)
     ]),
     PrismaModule,
     AuditModule,
@@ -27,7 +27,7 @@ import { ScryfallModule } from './scryfall/scryfall.module';
   controllers: [AppController],
   providers: [
     AppService,
-    { provide: APP_GUARD, useClass: ThrottlerGuard },
+  //  { provide: APP_GUARD, useClass: ThrottlerGuard },
     ScryfallService,
     CardsService,
   ],

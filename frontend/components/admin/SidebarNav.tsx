@@ -48,9 +48,9 @@ export default function SidebarNav() {
   const pathname = usePathname();
 
   return (
-    <aside className="w-64 border-r bg-white">
+    <aside className="w-64 border-r border-zinc-800 bg-zinc-900">
       <nav className="flex flex-col p-4">
-        <h2 className="mb-6 px-3 text-lg font-semibold text-gray-800">
+        <h2 className="mb-6 px-3 text-lg font-semibold text-zinc-100">
           Admin Panel
         </h2>
 
@@ -67,8 +67,8 @@ export default function SidebarNav() {
                 href={item.href}
                 className={`flex items-center gap-3 rounded-lg px-3 py-2 transition-colors ${
                   active
-                    ? 'bg-gray-900 text-white'
-                    : 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+                    ? 'bg-zinc-800 text-zinc-100'
+                    : 'text-zinc-400 hover:bg-zinc-800/50 hover:text-zinc-200'
                 }`}
               >
                 <Icon size={20} />
