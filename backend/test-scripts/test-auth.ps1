@@ -35,21 +35,29 @@
     Seeded admin email. Default is `admin@gray-merchant.test` (matches prisma/seed.ts).
 
 .PARAMETER AdminPassword
-    Seeded admin password. Default is `ChangeMe123!` (matches prisma/seed.ts).
+    Password configured by `SEED_ADMIN_PASSWORD` when the database was seeded.
+
+.PARAMETER ClientSecret
+    Secret configured for the `gray-merchant-staff` application.
+
+.PARAMETER CookieName
+    Refresh-session cookie name. Must match `AUTH_COOKIE_NAME`.
 
 .PARAMETER SkipSlow
     Skip the lockout + throttler scenarios (they take ~30s and pin a user
     for 15 minutes).
 
 .EXAMPLE
-    .\test-auth.ps1
-    .\test-auth.ps1 -BaseUrl http://localhost:3001 -Verbose
+    .\test-auth.ps1 -AdminPassword '...' -ClientSecret '...'
+    .\test-auth.ps1 -BaseUrl http://localhost:3001 -AdminPassword '...' -ClientSecret '...' -Verbose
 #>
 [CmdletBinding()]
 param(
     [string]$BaseUrl = 'http://localhost:3001',
     [string]$AdminEmail = 'admin@gray-merchant.test',
-    [string]$AdminPassword = 'ChangeMe123!',
+    [Parameter(Mandatory)][string]$AdminPassword,
+    [Parameter(Mandatory)][string]$ClientSecret,
+    [string]$CookieName = 'auth_session',
     [switch]$SkipSlow
 )
 
@@ -127,6 +135,17 @@ function Invoke-Api {
     )
 
     $uri = "$BaseUrl$Path"
+    if ($Method -eq 'GET' -and $null -ne $Body) {
+        $query = @(
+            foreach ($entry in $Body.GetEnumerator()) {
+                $key = [uri]::EscapeDataString([string]$entry.Key)
+                $value = [uri]::EscapeDataString([string]$entry.Value)
+                "$key=$value"
+            }
+        ) -join '&'
+        if ($query) { $uri = "$uri`?$query" }
+        $Body = $null
+    }
     $reqHeaders = @{
         'Accept' = 'application/json'
     } + $Headers
@@ -146,9 +165,8 @@ function Invoke-Api {
     if ($null -ne $Body) {
         $splat['Body'] = ($Body | ConvertTo-Json -Depth 10 -Compress)
     }
-    if ($AllowRedirect) {
-        # do nothing -- Invoke-WebRequest follows by default in PS Core, but
-        # we want to capture the Location header, so we use MaximumRedirection 0
+    if (-not $AllowRedirect) {
+        # Keep the original response so OAuth tests can inspect Location.
         $splat['MaximumRedirection'] = 0
     }
     if ($OutFile) {
@@ -157,22 +175,23 @@ function Invoke-Api {
 
     try {
         $resp = Invoke-WebRequest @splat -ErrorAction Stop
-    } catch [System.Net.WebException] {
-        # WebException is thrown for >=400 status codes. Pull the underlying
-        # response so we can read the body.
+    } catch {
         $resp = $_.Exception.Response
+        if ($null -eq $resp) { throw }
     }
 
     $status = [int]$resp.StatusCode
     $rawBody = ''
-    try {
+    if ($resp.PSObject.Properties.Name -contains 'Content') {
+        $rawBody = [string]$resp.Content
+    } else { try {
         $stream = $resp.GetResponseStream()
         if ($stream) {
             $reader = New-Object System.IO.StreamReader($stream)
             $rawBody = $reader.ReadToEnd()
             $reader.Close()
         }
-    } catch { }
+    } catch { } }
 
     $parsed = $null
     if ($rawBody -and $rawBody.Trim().Length -gt 0) {
@@ -188,7 +207,7 @@ function Invoke-Api {
 }
 
 function Extract-Cookie {
-    param([Parameter(Mandatory)][System.Net.Http.Headers.HttpResponseHeaders]$Headers,
+    param([Parameter(Mandatory)]$Headers,
           [string]$Name)
     try {
         $cookies = $Headers.GetValues('Set-Cookie')
@@ -284,13 +303,8 @@ $dup = Invoke-Api -Method POST -Path '/auth/register' -Body @{
     email    = $userEmail
     password = $userPassword
 }
-# The service throws a generic Error which bubbles through the global filter
-# as a 500. We accept either 4xx (zod/duplicate) or 500.
-if ($dup.StatusCode -ge 400) {
-    Write-Ok "duplicate registration is rejected (status=$($dup.StatusCode))"
-} else {
-    Write-Fail "duplicate registration unexpectedly accepted (status=$($dup.StatusCode))"
-}
+Assert-Equal 409 $dup.StatusCode 'duplicate registration returns 409'
+Assert-Equal 'EMAIL_ALREADY_EXISTS' $dup.Body.errorCode 'duplicate registration error code'
 
 # 1c. weak password (validation failure)
 $weak = Invoke-Api -Method POST -Path '/auth/register' -Body @{
@@ -327,8 +341,8 @@ Assert-NotNull $login.Body.accessToken  'login returns accessToken'
 Assert-NotNull $login.Body.refreshToken 'login returns refreshToken'
 Assert-Equal 'USER' $login.Body.user.type 'login user.type=USER'
 
-$cookieValue = Extract-Cookie -Headers $login.Headers -Name 'auth_session'
-Assert-NotNull $cookieValue 'login sets the auth_session cookie'
+$cookieValue = Extract-Cookie -Headers $login.Headers -Name $CookieName
+Assert-NotNull $cookieValue "login sets the $CookieName cookie"
 
 # 2b. wrong password is rejected
 $badPw = Invoke-Api -Method POST -Path '/auth/login' -Body @{
@@ -346,7 +360,7 @@ Assert-True ($badPw.StatusCode -ge 400) 'wrong password is rejected'
 # ---------------------------------------------------------------------------
 Write-Banner '3. GET /auth/session'
 
-$sessCookie = Invoke-Api -Method GET -Path '/auth/session' -Cookie "auth_session=$cookieValue"
+$sessCookie = Invoke-Api -Method GET -Path '/auth/session' -Cookie "${CookieName}=$cookieValue"
 Assert-Equal 200 $sessCookie.StatusCode 'session lookup via cookie returns 200'
 Assert-Equal $true $sessCookie.Body.authenticated 'session lookup via cookie reports authenticated'
 Assert-Equal $userEmail $sessCookie.Body.user.email 'session lookup returns the registered email'
@@ -360,6 +374,11 @@ Assert-Equal $true $sessBearer.Body.authenticated 'session lookup via bearer rep
 $sessAnon = Invoke-Api -Method GET -Path '/auth/session'
 Assert-Equal 200 $sessAnon.StatusCode 'anonymous session returns 200'
 Assert-Equal $false $sessAnon.Body.authenticated 'anonymous session reports not authenticated'
+
+$sessBadBearer = Invoke-Api -Method GET -Path '/auth/session' `
+    -Headers @{ 'Authorization' = 'Bearer definitely-not-a-jwt' }
+Assert-Equal 401 $sessBadBearer.StatusCode 'invalid bearer is rejected instead of treated as anonymous'
+Assert-Equal 'UNAUTHENTICATED' $sessBadBearer.Body.errorCode 'invalid bearer error code'
 
 # ---------------------------------------------------------------------------
 # 4. Refresh (rotating)
@@ -382,12 +401,12 @@ Assert-Equal 401 $reuseOld.StatusCode 'old refresh token is rejected after rotat
 Assert-Equal 'INVALID_REFRESH_TOKEN' $reuseOld.Body.errorCode 'old refresh token error code'
 
 # Refresh via cookie
-$refreshCookie = Extract-Cookie -Headers $refresh.Headers -Name 'auth_session'
+$refreshCookie = Extract-Cookie -Headers $refresh.Headers -Name $CookieName
 Assert-NotNull $refreshCookie 'refresh sets a fresh cookie'
 $cookieRefresh = Invoke-Api -Method POST -Path '/auth/refresh' -Body @{} `
-    -Cookie "auth_session=$refreshCookie"
+    -Cookie "${CookieName}=$refreshCookie"
 Assert-Equal 200 $cookieRefresh.StatusCode 'refresh via cookie works'
-$cookieValue = Extract-Cookie -Headers $cookieRefresh.Headers -Name 'auth_session'
+$cookieValue = Extract-Cookie -Headers $cookieRefresh.Headers -Name $CookieName
 if (-not $cookieValue) { $cookieValue = $refreshCookie }
 
 # Missing refresh token entirely
@@ -483,6 +502,7 @@ $token = Invoke-Api -Method POST -Path '/auth/token' -Body @{
     client_id     = 'gray-merchant-staff'
     redirect_uri  = 'http://localhost:3000/admin/callback'
     code_verifier = $pkce.verifier
+    client_secret = $ClientSecret
 }
 Assert-Equal 200 $token.StatusCode 'token exchange returns 200'
 Assert-NotNull $token.Body.access_token  'token exchange returns access_token'
@@ -497,6 +517,7 @@ $reuseToken = Invoke-Api -Method POST -Path '/auth/token' -Body @{
     client_id     = 'gray-merchant-staff'
     redirect_uri  = 'http://localhost:3000/admin/callback'
     code_verifier = $pkce.verifier
+    client_secret = $ClientSecret
 }
 Assert-Equal 400 $reuseToken.StatusCode 'token reuse returns 400'
 Assert-Equal 'INVALID_CODE' $reuseToken.Body.errorCode 'token reuse error code'
@@ -524,6 +545,7 @@ $plainToken = Invoke-Api -Method POST -Path '/auth/token' -Body @{
     client_id     = 'gray-merchant-staff'
     redirect_uri  = 'http://localhost:3000/admin/callback'
     code_verifier = $plainVerifier
+    client_secret = $ClientSecret
 }
 Assert-Equal 200 $plainToken.StatusCode 'PLAIN token exchange returns 200'
 Assert-NotNull $plainToken.Body.access_token 'PLAIN token exchange returns access_token'
@@ -547,6 +569,7 @@ $badExchange = Invoke-Api -Method POST -Path '/auth/token' -Body @{
     client_id     = 'gray-merchant-staff'
     redirect_uri  = 'http://localhost:3000/admin/callback'
     code_verifier = $badVerifier.verifier
+    client_secret = $ClientSecret
 }
 Assert-Equal 400 $badExchange.StatusCode 'bad PKCE verifier returns 400'
 Assert-Equal 'INVALID_CODE' $badExchange.Body.errorCode 'bad PKCE verifier error code'
@@ -557,7 +580,8 @@ Assert-Equal 'INVALID_CODE' $badExchange.Body.errorCode 'bad PKCE verifier error
 Write-Banner '8. POST /auth/client-token'
 
 $ct = Invoke-Api -Method POST -Path '/auth/client-token' -Body @{
-    clientId = 'gray-merchant-staff'
+    clientId     = 'gray-merchant-staff'
+    clientSecret = $ClientSecret
 }
 Assert-Equal 200 $ct.StatusCode 'client-token returns 200'
 Assert-NotNull $ct.Body.accessToken 'client-token returns accessToken'
@@ -567,10 +591,18 @@ Assert-Equal 400 $ctMissing.StatusCode 'client-token without clientId returns 40
 Assert-Equal 'MISSING_CLIENT_ID' $ctMissing.Body.errorCode 'client-token missing clientId error code'
 
 $ctBad = Invoke-Api -Method POST -Path '/auth/client-token' -Body @{
-    clientId = 'no-such-app'
+    clientId     = 'no-such-app'
+    clientSecret = $ClientSecret
 }
 Assert-Equal 400 $ctBad.StatusCode 'client-token rejects unknown client'
 Assert-Equal 'INVALID_CLIENT' $ctBad.Body.errorCode 'client-token unknown client error code'
+
+$ctWrongSecret = Invoke-Api -Method POST -Path '/auth/client-token' -Body @{
+    clientId     = 'gray-merchant-staff'
+    clientSecret = 'incorrect'
+}
+Assert-Equal 401 $ctWrongSecret.StatusCode 'client-token rejects an invalid secret'
+Assert-Equal 'INVALID_CLIENT_SECRET' $ctWrongSecret.Body.errorCode 'client-token secret error code'
 
 # ---------------------------------------------------------------------------
 # 9. Staff / admin login
@@ -582,6 +614,7 @@ $adminLogin = Invoke-Api -Method POST -Path '/auth/staff/login' -Body @{
     email         = $AdminEmail
     password      = $AdminPassword
     client_id     = 'gray-merchant-staff'
+    client_secret = $ClientSecret
 }
 Assert-Equal 200 $adminLogin.StatusCode 'staff/admin login returns 200'
 Assert-NotNull $adminLogin.Body.accessToken 'staff/admin login returns accessToken'
@@ -598,6 +631,7 @@ $userAsStaff = Invoke-Api -Method POST -Path '/auth/staff/login' -Body @{
     email     = $userEmail
     password  = $userPassword
     client_id = 'gray-merchant-staff'
+    client_secret = $ClientSecret
 }
 Assert-True ($userAsStaff.StatusCode -ge 400) 'staff login rejects USER-type accounts'
 
@@ -606,6 +640,7 @@ $badClient = Invoke-Api -Method POST -Path '/auth/staff/login' -Body @{
     email     = $AdminEmail
     password  = $AdminPassword
     client_id = 'no-such-app'
+    client_secret = $ClientSecret
 }
 Assert-Equal 400 $badClient.StatusCode 'staff login with bad client_id returns 400'
 Assert-Equal 'INVALID_CLIENT' $badClient.Body.errorCode 'staff login bad client error code'
@@ -615,6 +650,7 @@ $badStaff = Invoke-Api -Method POST -Path '/auth/staff/login' -Body @{
     email     = $AdminEmail
     password  = 'DefinitelyWrong!1'
     client_id = 'gray-merchant-staff'
+    client_secret = $ClientSecret
 }
 Assert-True ($badStaff.StatusCode -ge 400) 'staff login rejects wrong password'
 
@@ -655,7 +691,7 @@ if (-not $SkipSlow) {
     for ($i = 1; $i -le 5; $i++) {
         $fail = Invoke-Api -Method POST -Path '/auth/login' -Body @{
             email    = $lockEmail
-            password = 'wrong-password'
+            password = 'DefinitelyWrong!1'
         }
         Write-Host "    attempt #$i status=$($fail.StatusCode)" -ForegroundColor DarkGray
     }
@@ -665,7 +701,7 @@ if (-not $SkipSlow) {
     }
     # Even the correct password should be rejected with an "Account locked" error.
     Assert-True ($locked.StatusCode -ge 400) 'account is locked after 5 failed attempts'
-    Assert-NotNull $locked.Body.message 'locked response includes an error message'
+    Assert-Equal 'ACCOUNT_LOCKED' $locked.Body.errorCode 'locked response error code'
 } else {
     Write-Banner '11. Account lockout -- skipped (SkipSlow)'
 }

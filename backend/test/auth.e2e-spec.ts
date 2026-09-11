@@ -18,15 +18,14 @@
  *   - Validation errors
  *
  * Run with:
- *   DATABASE_URL=... npx jest --config ./test/jest-e2e.json --runInBand
+ *   TEST_DATABASE_URL=... npm run test:auth
  *
- * The suite truncates the auth-related tables before it starts so it is
- * safe to re-run. The throttler is *overridden* to unlimited in the test
- * module so the suite never flakes on rate limits.
+ * The suite deletes auth-related records from the disposable test database
+ * before it starts. AppModule skips throttling in NODE_ENV=test so the suite
+ * never flakes on rate limits.
  */
 import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test, TestingModule } from '@nestjs/testing';
-import { ThrottlerGuard } from '@nestjs/throttler';
 import cookieParser from 'cookie-parser';
 import * as crypto from 'crypto';
 import request from 'supertest';
@@ -34,14 +33,8 @@ import { App } from 'supertest/types';
 
 import { AppModule } from '../src/app.module';
 import { ZodErrorFilter } from '../src/auth/zod-error.filter';
-import { AUTH_SESSION_COOKIE_NAME } from '../src/common/cookies';
+import { getAuthSessionCookieName } from '../src/common/cookies';
 import { PrismaService } from '../src/prisma/prisma.service';
-
-class NoopGuard {
-  canActivate(): boolean {
-    return true;
-  }
-}
 
 interface PkcePair {
   verifier: string;
@@ -118,6 +111,8 @@ const STRONG_PASSWORD = 'StrongP4ss!word';
 const STAFF_CLIENT_ID = 'gray-merchant-staff';
 
 const STAFF_REDIRECT_URI = 'http://localhost:3000/admin/callback';
+const STAFF_CLIENT_SECRET =
+  process.env.SEED_STAFF_CLIENT_SECRET ?? 'TestClientSecret!2026';
 
 describe('Auth / SSO e2e', () => {
   let app: INestApplication<App>;
@@ -128,10 +123,7 @@ describe('Auth / SSO e2e', () => {
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
-    })
-      .overrideGuard(ThrottlerGuard)
-      .useClass(NoopGuard)
-      .compile();
+    }).compile();
 
     app = moduleFixture.createNestApplication();
     app.use(cookieParser());
@@ -153,6 +145,7 @@ describe('Auth / SSO e2e', () => {
     const bcrypt = await import('bcrypt');
     const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS ?? '12', 10);
     const adminHash = await bcrypt.hash(adminPassword, saltRounds);
+    const clientSecretHash = await bcrypt.hash(STAFF_CLIENT_SECRET, saltRounds);
     await prisma.user.upsert({
       where: { email: adminEmail },
       update: {
@@ -164,10 +157,11 @@ describe('Auth / SSO e2e', () => {
     });
     await prisma.application.upsert({
       where: { clientId: STAFF_CLIENT_ID },
-      update: {},
+      update: { clientSecret: clientSecretHash },
       create: {
         name: 'Gray Merchant Staff App',
         clientId: STAFF_CLIENT_ID,
+        clientSecret: clientSecretHash,
         redirectUri: STAFF_REDIRECT_URI,
       },
     });
@@ -284,7 +278,7 @@ describe('Auth / SSO e2e', () => {
       }
       expect(
         (cookies as string[]).some((c) =>
-          c.startsWith(`${AUTH_SESSION_COOKIE_NAME}=`),
+          c.startsWith(`${getAuthSessionCookieName()}=`),
         ),
       ).toBe(true);
     });
@@ -340,7 +334,7 @@ describe('Auth / SSO e2e', () => {
       }
 
       expect(
-        cookies.some((c) => c.startsWith(`${AUTH_SESSION_COOKIE_NAME}=`)),
+        cookies.some((c) => c.startsWith(`${getAuthSessionCookieName()}=`)),
       ).toBe(true);
 
       const res = await request(app.getHttpServer())
@@ -362,6 +356,15 @@ describe('Auth / SSO e2e', () => {
       const body = bodyOf<SessionResponse>(res);
 
       expect(body.authenticated).toBe(false);
+    });
+
+    it('rejects a malformed bearer instead of treating it as anonymous', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/auth/session')
+        .set('Authorization', 'Bearer definitely-not-a-jwt');
+
+      expect(res.status).toBe(401);
+      expect(bodyOf<ErrorResponse>(res).errorCode).toBe('UNAUTHENTICATED');
     });
   });
 
@@ -494,6 +497,7 @@ describe('Auth / SSO e2e', () => {
           email: adminEmail,
           password: adminPassword,
           client_id: STAFF_CLIENT_ID,
+          client_secret: STAFF_CLIENT_SECRET,
         })
         .expect(200);
 
@@ -551,6 +555,27 @@ describe('Auth / SSO e2e', () => {
       expect(body.errorCode).toBe('INVALID_REDIRECT_URI');
     });
 
+    it('does not create a session for an invalid OAuth client', async () => {
+      const email = randomEmail('invalid-client');
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email, password: STRONG_PASSWORD })
+        .expect(201);
+      const before = await prisma.session.count();
+
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({
+          email,
+          password: STRONG_PASSWORD,
+          client_id: 'no-such-app',
+          redirect_uri: STAFF_REDIRECT_URI,
+        })
+        .expect(400);
+
+      expect(await prisma.session.count()).toBe(before);
+    });
+
     it('login + token completes a PKCE S256 round-trip', async () => {
       const email = randomEmail('pkce');
       await request(app.getHttpServer())
@@ -588,6 +613,7 @@ describe('Auth / SSO e2e', () => {
           client_id: STAFF_CLIENT_ID,
           redirect_uri: STAFF_REDIRECT_URI,
           code_verifier: pkce.verifier,
+          client_secret: STAFF_CLIENT_SECRET,
         })
         .expect(200);
       const tokenBody = bodyOf<TokenResponse>(token);
@@ -606,6 +632,7 @@ describe('Auth / SSO e2e', () => {
           client_id: STAFF_CLIENT_ID,
           redirect_uri: STAFF_REDIRECT_URI,
           code_verifier: pkce.verifier,
+          client_secret: STAFF_CLIENT_SECRET,
         });
       expect(reuse.status).toBe(400);
       const reuseBody = bodyOf<ErrorResponse>(reuse);
@@ -647,6 +674,7 @@ describe('Auth / SSO e2e', () => {
           client_id: STAFF_CLIENT_ID,
           redirect_uri: STAFF_REDIRECT_URI,
           code_verifier: verifier,
+          client_secret: STAFF_CLIENT_SECRET,
         })
         .expect(200);
       const tokenBody = bodyOf<TokenResponse>(token);
@@ -685,6 +713,7 @@ describe('Auth / SSO e2e', () => {
         client_id: STAFF_CLIENT_ID,
         redirect_uri: STAFF_REDIRECT_URI,
         code_verifier: bad.verifier,
+        client_secret: STAFF_CLIENT_SECRET,
       });
       expect(res.status).toBe(400);
       const body = bodyOf<ErrorResponse>(res);
@@ -696,10 +725,22 @@ describe('Auth / SSO e2e', () => {
     it('returns an accessToken for a known client', async () => {
       const res = await request(app.getHttpServer())
         .post('/auth/client-token')
-        .send({ clientId: STAFF_CLIENT_ID })
+        .send({
+          clientId: STAFF_CLIENT_ID,
+          clientSecret: STAFF_CLIENT_SECRET,
+        })
         .expect(200);
       const body = bodyOf<{ accessToken: string }>(res);
       expect(body.accessToken).toBeDefined();
+    });
+
+    it('rejects a missing or invalid client secret', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/auth/client-token')
+        .send({ clientId: STAFF_CLIENT_ID, clientSecret: 'incorrect' });
+      expect(res.status).toBe(401);
+      const body = bodyOf<ErrorResponse>(res);
+      expect(body.errorCode).toBe('INVALID_CLIENT_SECRET');
     });
 
     it('returns 400 with MISSING_CLIENT_ID when clientId is absent', async () => {
@@ -714,7 +755,10 @@ describe('Auth / SSO e2e', () => {
     it('returns 400 with INVALID_CLIENT for an unknown client', async () => {
       const res = await request(app.getHttpServer())
         .post('/auth/client-token')
-        .send({ clientId: 'no-such-app' });
+        .send({
+          clientId: 'no-such-app',
+          clientSecret: STAFF_CLIENT_SECRET,
+        });
       expect(res.status).toBe(400);
       const body = bodyOf<ErrorResponse>(res);
       expect(body.errorCode).toBe('INVALID_CLIENT');
@@ -729,6 +773,7 @@ describe('Auth / SSO e2e', () => {
           email: adminEmail,
           password: adminPassword,
           client_id: STAFF_CLIENT_ID,
+          client_secret: STAFF_CLIENT_SECRET,
         })
         .expect(200);
       const body = bodyOf<LoginResponse>(res);
@@ -750,6 +795,7 @@ describe('Auth / SSO e2e', () => {
           email,
           password: STRONG_PASSWORD,
           client_id: STAFF_CLIENT_ID,
+          client_secret: STAFF_CLIENT_SECRET,
         });
       expect(res.status).toBeGreaterThanOrEqual(400);
     });
@@ -761,6 +807,7 @@ describe('Auth / SSO e2e', () => {
           email: adminEmail,
           password: adminPassword,
           client_id: 'no-such-app',
+          client_secret: STAFF_CLIENT_SECRET,
         });
       expect(res.status).toBe(400);
       const body = bodyOf<ErrorResponse>(res);
@@ -774,6 +821,7 @@ describe('Auth / SSO e2e', () => {
           email: adminEmail,
           password: 'DefinitelyWrong!1',
           client_id: STAFF_CLIENT_ID,
+          client_secret: STAFF_CLIENT_SECRET,
         });
       expect(res.status).toBeGreaterThanOrEqual(400);
     });
@@ -814,6 +862,29 @@ describe('Auth / SSO e2e', () => {
     });
   });
 
+  describe('Session limits', () => {
+    it('keeps no more than MAX_SESSIONS_PER_USER active sessions', async () => {
+      const email = randomEmail('session-limit');
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({ email, password: STRONG_PASSWORD })
+        .expect(201);
+      const user = await prisma.user.findUniqueOrThrow({ where: { email } });
+      const maxSessions = Number(process.env.MAX_SESSIONS_PER_USER ?? '5');
+
+      for (let i = 0; i <= maxSessions; i++) {
+        await request(app.getHttpServer())
+          .post('/auth/login')
+          .send({ email, password: STRONG_PASSWORD })
+          .expect(200);
+      }
+
+      expect(await prisma.session.count({ where: { userId: user.id } })).toBe(
+        maxSessions,
+      );
+    });
+  });
+
   describe('Account lockout', () => {
     it('locks the account after 5 failed logins', async () => {
       const email = randomEmail('lock');
@@ -825,7 +896,7 @@ describe('Auth / SSO e2e', () => {
       for (let i = 0; i < 5; i++) {
         await request(app.getHttpServer())
           .post('/auth/login')
-          .send({ email, password: 'wrong-password' });
+          .send({ email, password: 'DefinitelyWrong!1' });
       }
 
       const locked = await request(app.getHttpServer())
@@ -833,7 +904,7 @@ describe('Auth / SSO e2e', () => {
         .send({ email, password: STRONG_PASSWORD });
       expect(locked.status).toBeGreaterThanOrEqual(400);
       const body = bodyOf<ErrorResponse>(locked);
-      expect(body.message).toBeDefined();
+      expect(body.errorCode).toBe('ACCOUNT_LOCKED');
     });
   });
 });
