@@ -5,10 +5,9 @@ import { AuthService } from './auth.service';
 import { AuthJwtModule } from './auth-jwt.module';
 import { PassportModule } from '@nestjs/passport';
 import { JwtStrategy } from './guards';
-import { AuthThrottlerModule } from './auth-throttler.module';
 
 @Module({
-  imports: [ConfigModule, AuthJwtModule, PassportModule, AuthThrottlerModule],
+  imports: [ConfigModule, AuthJwtModule, PassportModule],
   controllers: [AuthController],
   providers: [AuthService, JwtStrategy],
   exports: [AuthService],

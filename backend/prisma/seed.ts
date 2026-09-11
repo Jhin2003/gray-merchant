@@ -26,10 +26,18 @@ async function main(): Promise<void> {
   }
 
   const saltRounds = parseInt(process.env.BCRYPT_SALT_ROUNDS ?? '12', 10);
-  const adminPassword = process.env.SEED_ADMIN_PASSWORD ?? 'ChangeMe123!';
+  const adminPassword = process.env.SEED_ADMIN_PASSWORD;
   const adminEmail = process.env.SEED_ADMIN_EMAIL ?? 'admin@gray-merchant.test';
+  if (!adminPassword) {
+    throw new Error('SEED_ADMIN_PASSWORD is required for the seed script');
+  }
+  const staffClientSecret = process.env.SEED_STAFF_CLIENT_SECRET;
+  if (!staffClientSecret) {
+    throw new Error('SEED_STAFF_CLIENT_SECRET is required for the seed script');
+  }
 
   const adminHash = await bcrypt.hash(adminPassword, saltRounds);
+  const clientSecretHash = await bcrypt.hash(staffClientSecret, saltRounds);
   await prisma.user.upsert({
     where: { email: adminEmail },
     update: {},
@@ -42,15 +50,15 @@ async function main(): Promise<void> {
 
   await prisma.application.upsert({
     where: { clientId: 'gray-merchant-staff' },
-    update: {},
+    update: { clientSecret: clientSecretHash },
     create: {
       name: 'Gray Merchant Staff App',
       clientId: 'gray-merchant-staff',
+      clientSecret: clientSecretHash,
       redirectUri: 'http://localhost:3000/admin/callback',
     },
   });
 
-  // eslint-disable-next-line no-console
   console.log('Seed complete:', {
     roles: roleNames,
     adminEmail,
@@ -60,7 +68,6 @@ async function main(): Promise<void> {
 
 main()
   .catch((e) => {
-    // eslint-disable-next-line no-console
     console.error(e);
     process.exit(1);
   })

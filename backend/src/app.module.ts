@@ -17,9 +17,16 @@ import { ListingsModule } from './listings/listings.module';
   imports: [
     CardsModule,
     ConfigModule.forRoot({ isGlobal: true }),
-    ThrottlerModule.forRoot([
-      { name: 'short', ttl: 60_000, limit: 100 }, // 100 req / min (global)
-    ]),
+    ThrottlerModule.forRoot({
+      // E2E tests exercise endpoint behavior repeatedly from one local IP.
+      // Production and development still use the limits below.
+      skipIf: () => process.env.NODE_ENV === 'test',
+      throttlers: [
+        { name: 'short', ttl: 60_000, limit: 100 }, // 100 req / min (global)
+        { name: 'login', ttl: 15 * 60_000, limit: 10 },
+        { name: 'register', ttl: 60 * 60_000, limit: 5 },
+      ],
+    }),
     PrismaModule,
     AuditModule,
     AuthModule,

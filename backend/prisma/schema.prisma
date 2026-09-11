@@ -5,10 +5,7 @@
     provider        = "prisma-client"
     output          = "../generated/prisma"
     moduleFormat    = "cjs"
-    // Prisma 7 requires a driver adapter to be configured on the client.
-    // The adapter (e.g. @prisma/adapter-pg) is supplied when instantiating
-    // PrismaClient in src/prisma/prisma.service.ts.
-    previewFeatures = ["driverAdapters"]
+    // The PostgreSQL adapter is supplied when PrismaClient is instantiated.
   }
 
 datasource db {

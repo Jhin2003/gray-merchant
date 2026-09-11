@@ -25,6 +25,20 @@
 
 [Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
 
+## Local auth setup
+
+Copy `.env.example` to `.env` and replace every placeholder. In particular,
+set `DATABASE_URL`, `JWT_SECRET`, `SEED_ADMIN_PASSWORD`, and
+`SEED_STAFF_CLIENT_SECRET`. Then prepare and seed the database:
+
+```bash
+npm run prisma:migrate
+npm run prisma:seed
+```
+
+`JWT_SECRET` is mandatory when `NODE_ENV=production`. Client tokens require
+the secret stored by the seed script.
+
 ## Project setup
 
 ```bash
@@ -52,6 +66,12 @@ $ npm run test
 
 # e2e tests
 $ npm run test:e2e
+
+# auth-only e2e tests (migrates, then clears auth data in TEST_DATABASE_URL)
+$ npm run test:auth
+
+# smoke-test an already running server (PowerShell)
+$ ./test-scripts/test-auth.ps1 -AdminPassword "..." -ClientSecret "..."
 
 # test coverage
 $ npm run test:cov

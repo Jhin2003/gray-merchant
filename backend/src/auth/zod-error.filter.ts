@@ -10,7 +10,7 @@ import {
 } from '@nestjs/common';
 import { Response } from 'express';
 import { ZodError } from 'zod';
-import { throwApiError, zodIssuesToDetails } from '../common/http';
+import { zodIssuesToDetails } from '../common/http';
 
 @Catch()
 export class ZodErrorFilter implements ExceptionFilter {
@@ -21,12 +21,12 @@ export class ZodErrorFilter implements ExceptionFilter {
     const res = ctx.getResponse<Response>();
 
     if (exception instanceof ZodError) {
-      throwApiError(
-        HttpStatus.BAD_REQUEST,
-        'VALIDATION_ERROR',
-        'Invalid input',
-        { details: zodIssuesToDetails(exception.issues) },
-      );
+      res.status(HttpStatus.BAD_REQUEST).json({
+        errorCode: 'VALIDATION_ERROR',
+        message: 'Invalid input',
+        details: zodIssuesToDetails(exception.issues),
+      });
+      return;
     }
 
     if (exception instanceof HttpException) {
@@ -41,10 +41,9 @@ export class ZodErrorFilter implements ExceptionFilter {
     }
 
     this.logger.error(exception);
-    throwApiError(
-      HttpStatus.INTERNAL_SERVER_ERROR,
-      'SERVER_ERROR',
-      'Something went wrong',
-    );
+    res.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
+      errorCode: 'SERVER_ERROR',
+      message: 'Something went wrong',
+    });
   }
 }
