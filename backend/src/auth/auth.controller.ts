@@ -11,15 +11,16 @@ import {
   Res,
   UseGuards,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import type { Request, Response } from 'express';
 import { ZodError } from 'zod';
-import * as bcrypt from 'bcrypt';
 import { AuthService } from './auth.service';
 import { registerSchema } from './dto/register.dto';
 import { loginSchema } from './dto/login.dto';
 import { staffLoginSchema } from './dto/staff-login.dto';
 import { refreshSchema } from './dto/refresh.dto';
 import { authorizeQuerySchema, tokenSchema } from './dto/authorize.dto';
+import { clientTokenSchema } from './dto/client-token.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
 import {
@@ -28,20 +29,25 @@ import {
   zodIssuesToDetails,
 } from '../common/http';
 import {
-  AUTH_SESSION_COOKIE_NAME,
   buildSessionCookieOptions,
+  getAuthSessionCookieName,
   getRefreshTokenFromRequest,
 } from '../common/cookies';
-import { JwtAuthGuard, UserTypeGuard } from './guards';
+import {
+  JwtAuthGuard,
+  OptionalJwtAuthGuard,
+  UserTypeGuard,
+  AllowedTypes,
+} from './guards';
 import { AccessTokenPayload } from './jwt-payload';
 import { UserType } from '../../generated/prisma/enums';
 import { Throttle } from '@nestjs/throttler';
+import { accessTokenTtlSeconds } from './auth.config';
+import { verifyClientSecret } from './client-secret';
 
 interface AuthedRequest extends Request {
   user?: AccessTokenPayload;
 }
-
-const ACCESS_TOKEN_TTL_SECONDS = 15 * 60;
 
 @Controller('auth')
 export class AuthController {
@@ -51,6 +57,7 @@ export class AuthController {
     private readonly auth: AuthService,
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly config: ConfigService,
   ) {}
 
   // ---------- registration (regular users only) ----------
@@ -69,7 +76,17 @@ export class AuthController {
       userId: user.id,
       ipAddress: req.ip,
     });
-    return { message: 'User registered', data: user };
+    return {
+      message: 'User registered',
+      data: {
+        id: user.id,
+        email: user.email,
+        type: user.type,
+        roleId: user.roleId,
+        createdAt: user.createdAt,
+        updatedAt: user.updatedAt,
+      },
+    };
   }
 
   // ---------- user login (shop customers) ----------
@@ -86,6 +103,13 @@ export class AuthController {
     const ipAddress = req.ip ?? null;
     const userAgent = req.headers['user-agent'] ?? null;
 
+    if (parsed.client_id && parsed.redirect_uri) {
+      await this.validateAuthorizationClient(
+        parsed.client_id,
+        parsed.redirect_uri,
+      );
+    }
+
     const result = await this.auth.loginUser(
       { email: parsed.email, password: parsed.password },
       {
@@ -101,7 +125,7 @@ export class AuthController {
     });
 
     res.cookie(
-      AUTH_SESSION_COOKIE_NAME,
+      getAuthSessionCookieName(),
       result.refreshToken,
       buildSessionCookieOptions(),
     );
@@ -149,11 +173,10 @@ export class AuthController {
     }
     const authedApp = assertPresent(application, 'application');
     if (authedApp.clientSecret) {
-      const stored = authedApp.clientSecret;
-      const isHashed = stored.startsWith('$2');
-      const valid = isHashed
-        ? await bcrypt.compare(parsed.client_secret ?? '', stored)
-        : stored === parsed.client_secret;
+      const valid = await verifyClientSecret(
+        parsed.client_secret,
+        authedApp.clientSecret,
+      );
       if (!valid) {
         throwApiError(401, 'INVALID_CLIENT_SECRET', 'Invalid client_secret');
       }
@@ -175,7 +198,7 @@ export class AuthController {
     await this.audit.log(action, { userId: result.userId, ipAddress });
 
     res.cookie(
-      AUTH_SESSION_COOKIE_NAME,
+      getAuthSessionCookieName(),
       result.refreshToken,
       buildSessionCookieOptions(),
     );
@@ -191,6 +214,7 @@ export class AuthController {
   // ---------- session / refresh / logout ----------
 
   @Get('session')
+  @UseGuards(OptionalJwtAuthGuard)
   async session(@Req() req: AuthedRequest) {
     const cookieToken = getRefreshTokenFromRequest(req);
     if (cookieToken) {
@@ -259,7 +283,7 @@ export class AuthController {
     const session = assertPresent(result, 'refresh result');
 
     res.cookie(
-      AUTH_SESSION_COOKIE_NAME,
+      getAuthSessionCookieName(),
       session.refreshToken,
       buildSessionCookieOptions(),
     );
@@ -294,7 +318,7 @@ export class AuthController {
       throwApiError(404, 'SESSION_NOT_FOUND', 'Session not found');
     }
 
-    res.clearCookie(AUTH_SESSION_COOKIE_NAME, {
+    res.clearCookie(getAuthSessionCookieName(), {
       ...buildSessionCookieOptions(),
       maxAge: 0,
     });
@@ -304,9 +328,9 @@ export class AuthController {
   // ---------- OAuth2 / SSO endpoints ----------
 
   @Get('authorize')
-  async authorize(@Query() query: Record<string, string>) {
+  async authorize(@Query() query: Record<string, string>, @Req() req: Request) {
     const parsed = authorizeQuerySchema.parse(query);
-    await this.audit.log('APP_AUTH_REQUEST', { ipAddress: undefined });
+    await this.audit.log('APP_AUTH_REQUEST', { ipAddress: req.ip });
 
     const application = await this.prisma.application.findUnique({
       where: { clientId: parsed.client_id },
@@ -355,11 +379,10 @@ export class AuthController {
       'application',
     ).clientSecret;
     if (tokenClientSecret) {
-      const stored = tokenClientSecret;
-      const isHashed = stored.startsWith('$2');
-      const valid = isHashed
-        ? await bcrypt.compare(parsed.client_secret ?? '', stored)
-        : stored === parsed.client_secret;
+      const valid = await verifyClientSecret(
+        parsed.client_secret,
+        tokenClientSecret,
+      );
       if (!valid) {
         throwApiError(401, 'INVALID_CLIENT_SECRET', 'Invalid client_secret');
       }
@@ -397,23 +420,40 @@ export class AuthController {
       access_token: session.accessToken,
       refresh_token: session.refreshToken,
       token_type: 'Bearer',
-      expires_in: ACCESS_TOKEN_TTL_SECONDS,
+      expires_in: accessTokenTtlSeconds(this.config),
     };
   }
 
   @Post('client-token')
   @HttpCode(HttpStatus.OK)
-  async clientToken(@Body() body: { clientId?: string }) {
-    if (!body?.clientId) {
+  async clientToken(@Body() body: unknown, @Req() req: Request) {
+    if (
+      typeof body !== 'object' ||
+      body === null ||
+      !('clientId' in body) ||
+      !body.clientId
+    ) {
       throwApiError(400, 'MISSING_CLIENT_ID', 'clientId required');
     }
+    const parsed = clientTokenSchema.parse(body);
     const application = await this.prisma.application.findUnique({
-      where: { clientId: body.clientId },
+      where: { clientId: parsed.clientId },
     });
     if (!application) throwApiError(400, 'INVALID_CLIENT', 'Invalid client');
-    const clientId = assertPresent(application, 'application').clientId;
-    const token = await this.auth.generateClientToken(clientId);
-    await this.audit.log('CLIENT_TOKEN_ISSUED', { ipAddress: undefined });
+    const authedApplication = assertPresent(application, 'application');
+    if (
+      !authedApplication.clientSecret ||
+      !(await verifyClientSecret(
+        parsed.clientSecret,
+        authedApplication.clientSecret,
+      ))
+    ) {
+      throwApiError(401, 'INVALID_CLIENT_SECRET', 'Invalid client_secret');
+    }
+    const token = await this.auth.generateClientToken(
+      authedApplication.clientId,
+    );
+    await this.audit.log('CLIENT_TOKEN_ISSUED', { ipAddress: req.ip });
     return token;
   }
 
@@ -426,6 +466,7 @@ export class AuthController {
   }
 
   @Get('admin')
+  @AllowedTypes(UserType.ADMIN)
   @UseGuards(JwtAuthGuard, UserTypeGuard)
   admin(@Req() req: AuthedRequest) {
     return { message: 'admin access granted', user: req.user };
@@ -441,20 +482,6 @@ export class AuthController {
     codeChallenge?: string;
     codeChallengeMethod?: string;
   }): Promise<string | null> {
-    const application = await this.prisma.application.findUnique({
-      where: { clientId: args.clientId },
-    });
-    if (!application) {
-      throwApiError(400, 'INVALID_CLIENT', 'Invalid client_id');
-    }
-    const grantRedirectUri = assertPresent(
-      application,
-      'application',
-    ).redirectUri;
-    if (grantRedirectUri !== args.redirectUri) {
-      throwApiError(400, 'INVALID_REDIRECT_URI', 'Invalid redirect_uri');
-    }
-
     const created = await this.auth.createAuthorizationCode({
       userId: args.userId,
       clientId: args.clientId,
@@ -468,6 +495,25 @@ export class AuthController {
     const params = new URLSearchParams({ code: created.code });
     if (args.state) params.set('state', args.state);
     return `${args.redirectUri}?${params.toString()}`;
+  }
+
+  private async validateAuthorizationClient(
+    clientId: string,
+    redirectUri: string,
+  ): Promise<void> {
+    const application = await this.prisma.application.findUnique({
+      where: { clientId },
+    });
+    if (!application) {
+      throwApiError(400, 'INVALID_CLIENT', 'Invalid client_id');
+    }
+    const registeredRedirectUri = assertPresent(
+      application,
+      'application',
+    ).redirectUri;
+    if (registeredRedirectUri !== redirectUri) {
+      throwApiError(400, 'INVALID_REDIRECT_URI', 'Invalid redirect_uri');
+    }
   }
 
   static errorHandler(err: unknown, ctx: { logger: Logger }) {

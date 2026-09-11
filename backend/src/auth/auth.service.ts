@@ -1,11 +1,20 @@
-import { Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
-import { UserType, User, Session } from '../../generated/prisma/client';
+import { Prisma, UserType, User, Session } from '../../generated/prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../audit/audit.service';
+import {
+  accessTokenTtl,
+  positiveInteger,
+  resolveJwtSecret,
+} from './auth.config';
 
 export interface SessionResult {
   accessToken: string;
@@ -22,9 +31,6 @@ export interface AuthContext {
 export interface LoginOptions extends AuthContext {
   allowedTypes?: UserType[];
 }
-
-const MAX_FAILED_ATTEMPTS = 5;
-const LOCK_DURATION_MS = 15 * 60 * 1000;
 
 @Injectable()
 export class AuthService {
@@ -47,22 +53,39 @@ export class AuthService {
       where: { email: normalizedEmail },
     });
     if (existing) {
-      throw new Error('Email already exists');
+      throw new ConflictException({
+        errorCode: 'EMAIL_ALREADY_EXISTS',
+        message: 'Email already exists',
+      });
     }
 
-    const saltRounds = parseInt(
-      this.config.get('BCRYPT_SALT_ROUNDS') ?? '12',
-      10,
+    const saltRounds = positiveInteger(
+      this.config.get<string>('BCRYPT_SALT_ROUNDS'),
+      12,
+      'BCRYPT_SALT_ROUNDS',
     );
     const hashed = await bcrypt.hash(args.password, saltRounds);
 
-    return this.prisma.user.create({
-      data: {
-        email: normalizedEmail,
-        password: hashed,
-        type: args.type,
-      },
-    });
+    try {
+      return await this.prisma.user.create({
+        data: {
+          email: normalizedEmail,
+          password: hashed,
+          type: args.type,
+        },
+      });
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2002'
+      ) {
+        throw new ConflictException({
+          errorCode: 'EMAIL_ALREADY_EXISTS',
+          message: 'Email already exists',
+        });
+      }
+      throw error;
+    }
   }
 
   async loginUser(
@@ -75,34 +98,72 @@ export class AuthService {
     });
 
     if (!user) {
-      throw new Error('Invalid credentials');
+      throw new UnauthorizedException({
+        errorCode: 'INVALID_CREDENTIALS',
+        message: 'Invalid credentials',
+      });
     }
 
     if (options.allowedTypes && !options.allowedTypes.includes(user.type)) {
-      throw new Error('Invalid credentials');
+      throw new UnauthorizedException({
+        errorCode: 'INVALID_CREDENTIALS',
+        message: 'Invalid credentials',
+      });
     }
 
-    if (user.lockedUntil && new Date(user.lockedUntil) > new Date()) {
-      throw new Error('Account locked due to repeated failed login attempts');
+    const now = new Date();
+    if (user.lockedUntil && new Date(user.lockedUntil) > now) {
+      throw new UnauthorizedException({
+        errorCode: 'ACCOUNT_LOCKED',
+        message: 'Account locked due to repeated failed login attempts',
+      });
+    }
+
+    let failedLoginAttempts = user.failedLoginAttempts ?? 0;
+    if (user.lockedUntil && new Date(user.lockedUntil) <= now) {
+      failedLoginAttempts = 0;
+      await this.prisma.user.update({
+        where: { id: user.id },
+        data: { failedLoginAttempts: 0, lockedUntil: null },
+      });
     }
 
     const isValid = await bcrypt.compare(args.password, user.password);
     if (!isValid) {
-      const nextAttempts = (user.failedLoginAttempts ?? 0) + 1;
-      const data: { failedLoginAttempts: number; lockedUntil?: Date | null } = {
-        failedLoginAttempts: nextAttempts,
-      };
-      if (nextAttempts >= MAX_FAILED_ATTEMPTS) {
-        data.lockedUntil = new Date(Date.now() + LOCK_DURATION_MS);
-      }
-      await this.prisma.user.update({
+      const maxFailedAttempts = positiveInteger(
+        this.config.get<string>('MAX_FAILED_LOGIN_ATTEMPTS'),
+        5,
+        'MAX_FAILED_LOGIN_ATTEMPTS',
+      );
+      const lockMinutes = positiveInteger(
+        this.config.get<string>('ACCOUNT_LOCK_MINUTES'),
+        15,
+        'ACCOUNT_LOCK_MINUTES',
+      );
+      const failedUser = await this.prisma.user.update({
         where: { id: user.id },
-        data,
+        data: { failedLoginAttempts: { increment: 1 } },
       });
-      throw new Error('Invalid credentials');
+
+      if (failedUser.failedLoginAttempts >= maxFailedAttempts) {
+        await this.prisma.user.update({
+          where: { id: user.id },
+          data: {
+            lockedUntil: new Date(Date.now() + lockMinutes * 60 * 1000),
+          },
+        });
+        await this.audit.log('ACCOUNT_LOCKED', {
+          userId: user.id,
+          ipAddress: options.ipAddress,
+        });
+      }
+      throw new UnauthorizedException({
+        errorCode: 'INVALID_CREDENTIALS',
+        message: 'Invalid credentials',
+      });
     }
 
-    if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+    if (failedLoginAttempts > 0 || user.lockedUntil) {
       await this.prisma.user.update({
         where: { id: user.id },
         data: { failedLoginAttempts: 0, lockedUntil: null },
@@ -130,11 +191,29 @@ export class AuthService {
     });
 
     const refreshToken = crypto.randomBytes(64).toString('hex');
-    const ttlDays = parseInt(
-      this.config.get('JWT_REFRESH_TTL_DAYS') ?? '30',
-      10,
+    const ttlDays = positiveInteger(
+      this.config.get<string>('JWT_REFRESH_TTL_DAYS'),
+      30,
+      'JWT_REFRESH_TTL_DAYS',
     );
     const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000);
+
+    const maxSessions = positiveInteger(
+      this.config.get<string>('MAX_SESSIONS_PER_USER'),
+      5,
+      'MAX_SESSIONS_PER_USER',
+    );
+    const sessionsToRemove = await this.prisma.session.findMany({
+      where: { userId: args.user.id },
+      orderBy: { createdAt: 'desc' },
+      skip: Math.max(0, maxSessions - 1),
+      select: { id: true },
+    });
+    if (sessionsToRemove.length > 0) {
+      await this.prisma.session.deleteMany({
+        where: { id: { in: sessionsToRemove.map(({ id }) => id) } },
+      });
+    }
 
     await this.prisma.session.create({
       data: {
@@ -178,8 +257,8 @@ export class AuthService {
     });
     const newRefreshToken = crypto.randomBytes(64).toString('hex');
 
-    await this.prisma.session.update({
-      where: { id: session.id },
+    const rotated = await this.prisma.session.updateMany({
+      where: { id: session.id, refreshToken },
       data: {
         token: accessToken,
         refreshToken: newRefreshToken,
@@ -187,6 +266,7 @@ export class AuthService {
         ipAddress: ctx.ipAddress ?? session.ipAddress,
       },
     });
+    if (rotated.count !== 1) return null;
 
     await this.audit.log('TOKEN_REFRESH', {
       userId: user.id,
@@ -299,10 +379,11 @@ export class AuthService {
       }
     }
 
-    await this.prisma.authorizationCode.update({
-      where: { id: authCode.id },
+    const consumed = await this.prisma.authorizationCode.updateMany({
+      where: { id: authCode.id, used: false },
       data: { used: true },
     });
+    if (consumed.count !== 1) return null;
     return { userId: authCode.userId };
   }
 
@@ -312,8 +393,11 @@ export class AuthService {
     roleId: number | null;
   }): string {
     const options = {
-      secret: this.config.get<string>('JWT_SECRET') ?? '',
-      expiresIn: this.config.get<string>('JWT_ACCESS_TTL') ?? '15m',
+      secret: resolveJwtSecret(this.config),
+      expiresIn: accessTokenTtl(this.config),
+      // Identical payloads signed during the same second would otherwise
+      // produce the same JWT and violate Session.token's unique constraint.
+      jwtid: crypto.randomUUID(),
     } as Parameters<JwtService['sign']>[1];
     return this.jwt.sign(payload, options);
   }
@@ -324,7 +408,7 @@ export class AuthService {
     const token = await this.jwt.signAsync(
       { clientId },
       {
-        secret: this.config.get<string>('JWT_SECRET') ?? '',
+        secret: resolveJwtSecret(this.config),
         expiresIn: '1h',
       },
     );
