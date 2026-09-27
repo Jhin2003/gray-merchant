@@ -11,6 +11,8 @@ import { ScryfallService } from './scryfall/scryfall.service';
 import { CardsService } from './cards/cards.service';
 import { CardsModule } from './cards/cards.module';
 import { ScryfallModule } from './scryfall/scryfall.module';
+import { ListingsModule } from './listings/listings.module';
+import { OrdersModule } from './orders/orders.module';
 
 @Module({
   imports: [
@@ -23,13 +25,15 @@ import { ScryfallModule } from './scryfall/scryfall.module';
     AuditModule,
     AuthModule,
     ScryfallModule,
+    ListingsModule,
+    OrdersModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
-  //  { provide: APP_GUARD, useClass: ThrottlerGuard },
     ScryfallService,
     CardsService,
+   
   ],
 })
 export class AppModule {}

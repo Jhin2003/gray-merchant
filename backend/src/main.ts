@@ -20,7 +20,7 @@ async function bootstrap(): Promise<void> {
   app.enableCors({
     origin: origins.length === 0 ? true : origins,
     credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',

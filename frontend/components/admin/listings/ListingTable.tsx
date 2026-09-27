@@ -1,23 +1,41 @@
 import { Listing } from "@/lib/types";
 import ListingTableRow from "./ListingTableRow";
 import { useState } from "react";
+import Pagination from "../Pagination";
 
 type Props = {
   listings: Listing[];
+
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  pageSize: number;
+
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
+
   onAddListing: () => void;
   onDelete: (id: number) => void;
   onView: (listing: Listing) => void;
+  onEdit: (listing: Listing) => void;
 };
 
 export default function ListingTable({
   listings,
+
+  page,
+  totalPages,
+  totalItems,
+  pageSize,
+
+  onPageChange,
+  onPageSizeChange,
+
   onAddListing,
   onDelete,
   onView,
+  onEdit,
 }: Props) {
-
-  
-    
   return (
     <div className="overflow-hidden rounded-xl border border-zinc-800 bg-zinc-900 shadow-lg">
       {/* Table Header */}
@@ -54,6 +72,7 @@ export default function ListingTable({
                   listing={listing}
                   onDelete={onDelete}
                   onView={onView}
+                  onEdit={onEdit}
                 />
               ))
             ) : (
@@ -69,6 +88,14 @@ export default function ListingTable({
           </tbody>
         </table>
       </div>
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        totalItems={totalItems}
+        pageSize={pageSize}
+        onPageChange={onPageChange}
+        onPageSizeChange={onPageSizeChange}
+      />
     </div>
   );
 }

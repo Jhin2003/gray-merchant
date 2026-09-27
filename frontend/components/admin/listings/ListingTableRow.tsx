@@ -5,10 +5,11 @@ type Props = {
   listing: Listing;
   onDelete: (id: number) => void;
   onView: (listing: Listing) => void;
+  onEdit: (listing: Listing) => void;
 
 };
 
-export default function ListingTableRow({ listing, onDelete, onView }: Props) {
+export default function ListingTableRow({ listing, onDelete, onView, onEdit }: Props) {
   return (
     <tr
       onClick={() => onView(listing)}
@@ -35,7 +36,12 @@ export default function ListingTableRow({ listing, onDelete, onView }: Props) {
 
       <td className="px-6 py-4">
         <div className="flex justify-end gap-2">
-          <button className="rounded-lg border border-zinc-700 p-2 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100">
+          <button 
+          onClick={(e) => {
+              e.stopPropagation();
+              onEdit(listing);
+            }}
+          className="rounded-lg border border-zinc-700 p-2 text-zinc-400 transition hover:bg-zinc-700 hover:text-zinc-100">
             <Pencil size={18} />
           </button>
 

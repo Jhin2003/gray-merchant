@@ -1,22 +1,39 @@
-export default function ProductGrid() {
-  return (
-    <section className="mt-6">
-      <div className="grid grid-cols-2 gap-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-        {Array.from({ length: 10 }).map((_, index) => (
-          <div
-            key={index}
-            className="overflow-hidden rounded-lg border bg-white shadow-sm"
-          >
-            <div className="aspect-[5/7] animate-pulse bg-gray-200" />
+import { Listing } from "@/lib/types";
+import ProductCard from "./ProductCard";
 
-            <div className="space-y-2 p-4">
-              <div className="h-4 w-3/4 rounded bg-gray-200" />
-              <div className="h-4 w-1/2 rounded bg-gray-200" />
-              <div className="h-6 w-1/3 rounded bg-gray-300" />
-            </div>
-          </div>
-        ))}
+interface Props {
+  listings: Listing[];
+  loading?: boolean;
+}
+
+export default function ProductGrid({
+  listings,
+  loading = false,
+}: Props) {
+  if (loading) {
+  return (
+    <section className="flex min-h-[500px] items-center justify-center">
+     <div className="h-6 w-6 animate-spin rounded-full border border-zinc-200 border-t-zinc-400 dark:border-zinc-800 dark:border-t-zinc-500" />
+    </section>
+  );
+}
+
+  if (listings.length === 0) {
+    return (
+      <div className="py-20 text-center text-gray-500">
+        No products found.
       </div>
+    );
+  }
+
+  return (
+    <section className="grid grid-cols-2 gap-6 md:grid-cols-4 lg:grid-cols-5">
+      {listings.map((listing) => (
+        <ProductCard
+          key={listing.id}
+          listing={listing}
+        />
+      ))}
     </section>
   );
 }

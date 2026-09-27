@@ -1,5 +1,7 @@
+import { CartProvider } from "@/lib/context/CartContext";
 import "./globals.css";
 import { Poppins } from "next/font/google";
+import { Toaster } from "react-hot-toast";
 
 const poppins = Poppins({
   subsets: ["latin"],
@@ -14,7 +16,14 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={poppins.variable}>
-      <body>{children}</body>
+      <body>
+        <CartProvider>
+        
+          {children}
+          <Toaster position="bottom-right" />
+        </CartProvider>
+        
+        </body>
     </html>
   );
 }

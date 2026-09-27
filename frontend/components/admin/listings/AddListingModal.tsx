@@ -25,8 +25,8 @@ export default function AddListingModal({
     cardId: 0,
     condition: "Near Mint",
     language: "English",
-    stock: "" as number | "",
-    price: "" as number | "",
+    stock: 1 as number | "",
+    price: 1 as number | "",
     isFoil: false,
   });
 
@@ -53,27 +53,31 @@ export default function AddListingModal({
       setQuery("");
       setResults([]);
       setSelectedCard(null);
-         setListing({
-      cardId: 0,
-      condition: "Near Mint",
-      language: "English",
-      stock: "",
-      price: "",
-      isFoil: false,
-    });
-  
+      setListing({
+        cardId: 0,
+        condition: "Near Mint",
+        language: "English",
+        stock: "",
+        price: "",
+        isFoil: false,
+      });
     }
   }, [isOpen]);
 
   useEffect(() => {
     if (!isOpen) return;
 
+    // FIX: Do not trigger search if the query is just the selected card's name
+    if (selectedCard && query === selectedCard.name) {
+      return;
+    }
+
     const timer = setTimeout(() => {
       handleSearch(query);
     }, 300);
 
     return () => clearTimeout(timer);
-  }, [query, isOpen]);
+  }, [query, isOpen, selectedCard]); // <-- Added selectedCard to dependencies
 
   if (!isOpen) return null;
 
@@ -103,47 +107,55 @@ export default function AddListingModal({
             <input
               type="text"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                // FIX: If the user starts typing again, clear the selected card
+                if (selectedCard) {
+                  setSelectedCard(null);
+                  setListing((prev) => ({ ...prev, cardId: 0 }));
+                }
+              }}
               placeholder="Search by card name..."
               className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-4 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none"
             />
 
-            {results.length > 0 && (
-              <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg">
-                {results.map((card) => (
-                  <button
-                    key={card.id}
-                    type="button"
-                    className="flex w-full items-center gap-3 border-b border-zinc-800 p-3 text-left transition hover:bg-zinc-800 last:border-0"
-                    onClick={() => {
-                      setSelectedCard(card);
-                      setQuery(card.name);
-                      setResults([]);
+            {results.length > 0 &&
+              !selectedCard && ( // FIX: Hide results if a card is selected
+                <div className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-zinc-700 bg-zinc-900 shadow-lg">
+                  {results.map((card) => (
+                    <button
+                      key={card.id}
+                      type="button"
+                      className="flex w-full items-center gap-3 border-b border-zinc-800 p-3 text-left transition hover:bg-zinc-800 last:border-0"
+                      onClick={() => {
+                        setSelectedCard(card);
+                        setQuery(card.name);
+                        setResults([]);
 
-                      setListing((prev) => ({
-                        ...prev,
-                        cardId: card.id,
-                      }));
-                    }}
-                  >
-                    {card.imageUrl && (
-                      <img
-                        src={card.imageUrl}
-                        alt={card.name}
-                        className="h-10 w-10 object-contain text-xs font-medium text-zinc-100"
-                      />
-                    )}
+                        setListing((prev) => ({
+                          ...prev,
+                          cardId: card.id,
+                        }));
+                      }}
+                    >
+                      {card.imageUrl && (
+                        <img
+                          src={card.imageUrl}
+                          alt={card.name}
+                          className="h-10 w-10 object-contain text-xs font-medium text-zinc-100"
+                        />
+                      )}
 
-                    <div>
-                      <div className="font-medium">{card.name}</div>
-                      <div className="text-sm text-zinc-400">
-                        {card.setName}
+                      <div>
+                        <div className="font-medium">{card.name}</div>
+                        <div className="text-sm text-zinc-400">
+                          {card.setName}
+                        </div>
                       </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+                    </button>
+                  ))}
+                </div>
+              )}
           </div>
 
           {/* Card Preview */}
@@ -227,11 +239,12 @@ export default function AddListingModal({
 
               <input
                 type="number"
+                min="1"
                 value={listing.stock}
                 onChange={(e) =>
                   setListing((prev) => ({
                     ...prev,
-                    stock:  e.target.value === "" ? "" : Number(e.target.value),
+                    stock: e.target.value === "" ? "" : Number(e.target.value),
                   }))
                 }
                 className="w-full rounded-lg border border-zinc-700 bg-zinc-800 px-3 py-2 text-zinc-100 placeholder:text-zinc-500 focus:border-blue-500 focus:outline-none"
@@ -245,6 +258,7 @@ export default function AddListingModal({
 
               <input
                 type="number"
+                min="1"
                 value={listing.price}
                 onChange={(e) =>
                   setListing((prev) => ({
@@ -289,7 +303,18 @@ export default function AddListingModal({
           </button>
 
           <button
-            onClick={() => onSave?.(listing)}
+            onClick={() => {
+              // 1. Format the data to strictly match CreateListingDto
+              const formattedListing = {
+                ...listing,
+                // If it's an empty string, send 0 to the API instead
+                stock: listing.stock === "" ? 1 : listing.stock,
+                price: listing.price === "" ? 1 : listing.price,
+              };
+
+              // 2. Pass the cleaned up data
+              onSave?.(formattedListing);
+            }}
             className="rounded-lg bg-blue-600 px-4 py-2 font-medium text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
           >
             Create Listing

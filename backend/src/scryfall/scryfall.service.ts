@@ -10,14 +10,13 @@ export class ScryfallService {
   constructor(private readonly prisma: PrismaService) {}
 
   async syncCards() {
+  
     const bulkUrl = await this.getBulkDownloadUrl();
 
-    const cards = await this.downloadBulkCards(bulkUrl);
-
-
+    await this.downloadBulkCards(bulkUrl);
 
     return {
-      downloaded: "done",
+      downloaded: 'done',
     };
   }
 
@@ -46,79 +45,79 @@ export class ScryfallService {
   }
 
   private async downloadBulkCards(url: string): Promise<void> {
-  const response = await this.scryfallFetch(url);
+    const response = await this.scryfallFetch(url);
 
-  if (!response.ok) {
-    throw new Error(`Failed to download bulk data: ${response.status}`);
-  }
+    if (!response.ok) {
+      throw new Error(`Failed to download bulk data: ${response.status}`);
+    }
 
-  if (!response.body) {
-    throw new Error('Response body is empty.');
-  }
+    if (!response.body) {
+      throw new Error('Response body is empty.');
+    }
 
-  // Convert the Web ReadableStream to a Node.js Readable stream
-  const stream = Readable.fromWeb(response.body as any);
+    // Convert the Web ReadableStream to a Node.js Readable stream
+    const stream = Readable.fromWeb(response.body as any);
 
-  // Decompress the .gz file
-  const gunzip = createGunzip();
+    // Decompress the .gz file
+    const gunzip = createGunzip();
 
-  // Pipe the download into the decompressor
-  const decompressed = stream.pipe(gunzip);
+    // Pipe the download into the decompressor
+    const decompressed = stream.pipe(gunzip);
 
-  // Read line by line
-  const rl = readline.createInterface({
-    input: decompressed,
-    crlfDelay: Infinity,
-  });
-
-  const batch: {
-  scryfallId: string;
-  name: string;
-  imageUrl: string | null;
-  setName: string;
-}[] = [];
-
-const BATCH_SIZE = 1000;
-
-for await (const line of rl) {
-  const card = JSON.parse(line);
-
-  // Skip cards that don't have a normal image
-  if (!card.image_uris?.normal) {
-    continue;
-  }
-
-  batch.push({
-    scryfallId: card.id,
-    name: card.name,
-    imageUrl: card.image_uris.normal,
-    setName: card.set_name,
-  });
-
-  // Once the batch reaches 1000 cards, insert it
-  if (batch.length >= BATCH_SIZE) {
-    await this.prisma.card.createMany({
-      data: batch,
-      skipDuplicates: true,
+    // Read line by line
+    const rl = readline.createInterface({
+      input: decompressed,
+      crlfDelay: Infinity,
     });
 
-    console.log(`Inserted ${batch.length} cards`);
+    const batch: {
+      scryfallId: string;
+      name: string;
+      imageUrl: string | null;
+      setName: string;
+    }[] = [];
 
-    // Clear the batch
-    batch.length = 0;
+    const BATCH_SIZE = 1000;
+
+    for await (const line of rl) {
+      const card = JSON.parse(line);
+
+      // Skip cards that don't have a border crop image
+      if (!card.image_uris?.border_crop) {
+        continue;
+      }
+
+      batch.push({
+        scryfallId: card.id,
+        name: card.name,
+        imageUrl: card.image_uris.border_crop,
+        setName: card.set_name,
+      });
+
+      // Once the batch reaches 1000 cards, insert it
+      if (batch.length >= BATCH_SIZE) {
+        await this.prisma.card.createMany({
+          data: batch,
+          skipDuplicates: true,
+        });
+
+        console.log(`Inserted ${batch.length} cards`);
+
+        // Clear the batch
+        batch.length = 0;
+      }
+    }
+
+    // Insert any remaining cards
+    if (batch.length > 0) {
+      await this.prisma.card.createMany({
+        data: batch,
+        skipDuplicates: true,
+      });
+
+      console.log(`Inserted final ${batch.length} cards`);
+    }
   }
-}
-
-// Insert any remaining cards
-if (batch.length > 0) {
-  await this.prisma.card.createMany({
-    data: batch,
-    skipDuplicates: true,
-  });
-
-  console.log(`Inserted final ${batch.length} cards`);
-}
-}
   private async scryfallFetch(url: string) {
     return fetch(url, {
       headers: {

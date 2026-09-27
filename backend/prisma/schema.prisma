@@ -15,46 +15,69 @@ datasource db {
   provider = "postgresql"
 }
 
-// Authflow-style roles (USER, ADMIN, STAFF, etc.)
-model Role {
-  id          Int       @id @default(autoincrement())
-  name        String    @unique
-  description String?
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-  users       User[]
+// ==========================================
+// ENUMS
+// ==========================================
+
+enum OrderStatus {
+  PENDING_PAYMENT
+  COMPLETED
+  PROCESSING
+  SHIPPED
+  DELIVERED
+  CANCELLED
 }
 
-// Single User model with a `type` discriminator (USER / STAFF / ADMIN)
-// so the same authentication logic can be reused for shop customers
-// and gray-merchant staff/admin operators.
+enum PaymentMethod {
+  GCASH
+  Maribank
+}
+
+enum ShippingMode {
+  LBC
+  JNT
+  BOOK_OWN
+}
+
 enum UserType {
   USER
   STAFF
   ADMIN
 }
 
-model User {
-  id                   String    @id @default(uuid())
-  email                String    @unique
-  password             String
-  type                 UserType  @default(USER)
-  roleId               Int?
-  role                 Role?     @relation(fields: [roleId], references: [id])
-  failedLoginAttempts  Int       @default(0)
-  lockedUntil          DateTime?
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+// ==========================================
+// AUTH & USERS
+// ==========================================
 
-  sessions             Session[]
-  authorizationCodes   AuthorizationCode[]
-  auditLogs            AuditLog[]
+model Role {
+  id          Int      @id @default(autoincrement())
+  name        String   @unique
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  users       User[]
+}
+
+model User {
+  id                  String    @id @default(uuid())
+  email               String    @unique
+  password            String
+  type                UserType  @default(USER)
+  roleId              Int?
+  role                Role?     @relation(fields: [roleId], references: [id])
+  failedLoginAttempts Int       @default(0)
+  lockedUntil         DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  sessions           Session[]
+  authorizationCodes AuthorizationCode[]
+  auditLogs          AuditLog[]
+  orders             Order[] 
 
   @@index([email])
 }
 
-// Server-side session records. The `token` field mirrors the access JWT
-// (for direct lookup); the `refreshToken` is rotated on every refresh.
 model Session {
   id           String   @id @default(uuid())
   token        String   @unique
@@ -65,13 +88,12 @@ model Session {
   userId       String
   user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt    DateTime @default(now())
-  updatedAt    DateTime  @updatedAt
+  updatedAt    DateTime @updatedAt
 
   @@index([userId])
   @@index([refreshToken])
 }
 
-// OAuth2 client registrations (apps that may request authorization codes).
 model Application {
   id           String   @id @default(uuid())
   name         String
@@ -82,25 +104,23 @@ model Application {
   updatedAt    DateTime @updatedAt
 }
 
-// Short-lived OAuth2 authorization codes (with PKCE support).
 model AuthorizationCode {
-  id                   String    @id @default(uuid())
-  code                 String    @unique
-  clientId             String
-  redirectUri          String
-  userId               String
-  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
-  codeChallenge        String?
-  codeChallengeMethod  String?
-  expiresAt            DateTime
-  used                 Boolean   @default(false)
-  createdAt            DateTime  @default(now())
+  id                  String   @id @default(uuid())
+  code                String   @unique
+  clientId            String
+  redirectUri         String
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeChallenge       String?
+  codeChallengeMethod String?
+  expiresAt           DateTime
+  used                Boolean  @default(false)
+  createdAt           DateTime @default(now())
 
   @@index([code])
   @@index([userId])
 }
 
-// Audit log for security-sensitive events (login, logout, lockout, etc.)
 model AuditLog {
   id        String   @id @default(uuid())
   action    String
@@ -114,32 +134,93 @@ model AuditLog {
   @@index([action])
 }
 
-// Existing gray-merchant domain model.
+// ==========================================
+// STORE (CARDS & LISTINGS)
+// ==========================================
+
 model Card {
-  id          Int      @id @default(autoincrement())
-
-  scryfallId  String   @unique
-  name        String
-  imageUrl    String?
- 
-  setName     String
-  listings    Listing[]
-
-  createdAt   DateTime @default(now())
+  id         Int       @id @default(autoincrement())
+  scryfallId String    @unique
+  name       String
+  imageUrl   String?
+  setName    String
+  createdAt  DateTime  @default(now())
+  
+  listings   Listing[]
 }
 
-
 model Listing {
-  id          Int      @id @default(autoincrement())
-
-  cardId      Int
-  card        Card     @relation(fields: [cardId], references: [id])
-
-  price       Decimal
-  stock       Int      @default(1)
-  condition   String
-  language    String
-  isFoil      Boolean
-  createdAt   DateTime @default(now())
+  id        Int      @id @default(autoincrement())
+  cardId    Int
+  card      Card     @relation(fields: [cardId], references: [id])
+  price     Decimal
+  stock     Int      @default(1)
+  condition String
+  language  String
+  isFoil    Boolean
+  createdAt DateTime @default(now())
   
+  orderItems OrderItem[] 
+}
+
+// ==========================================
+// ORDERS
+// ==========================================
+
+model Order {
+  id            String   @id @default(uuid())
+  orderNumber   String   @unique 
+
+  // Customer Contact
+
+  email         String
+  phone         String
+  firstName     String
+  lastName      String
+  
+  // Shipping Address
+  streetAddress String
+  barangay      String
+  city          String
+  province      String
+  postalCode    String
+
+  // Order Details
+  paymentMethod PaymentMethod
+  shippingMode  ShippingMode
+  status        OrderStatus   @default(PENDING_PAYMENT)
+  
+  // Financials 
+  subtotal      Decimal
+  shippingFee   Decimal
+  total         Decimal
+
+  // Relations
+  items         OrderItem[] 
+  
+  userId        String?
+  user          User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([userId])
+  @@index([orderNumber])
+}
+
+model OrderItem {
+  id              Int      @id @default(autoincrement())
+  
+  quantity        Int
+  priceAtPurchase Decimal  
+  
+  // Relations
+  orderId         String
+  order           Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  
+  listingId       Int
+  listing         Listing  @relation(fields: [listingId], references: [id], onDelete: Restrict)
+  
+  @@index([orderId])
+  @@index([listingId])
 }
